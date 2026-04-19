@@ -3,13 +3,7 @@ var RNG = RandomNumberGenerator.new()
 
 #Plane Directory:
 #Positions 0 & 6 are position holders for offscreen planes. 
-var ord0 = 535
-var ord1 = 434
-var ord2 = 363
-var ord3 = 291
-var ord4 = 219
-var ord5 = 149
-var ord6 = 50
+var ord_y_positions: PackedInt32Array = [535, 434, 363,291,219,149, 50]
 var spacer = 90
 var SquSpa = 45
 var plane = load("res://f_15c.tscn")
@@ -47,8 +41,9 @@ func _ready() -> void:
 	
 	#Has to navigate through squadron panel
 	#Creates planes and assigns them to the inside of a squadron
+	#This should be organized into it's own GD, allowing user to selection Squadrons instead.
 	_buildplaneS("Su7", "RED", get_node("Squadron Panel/zc7"))
-	_buildplaneS("F-34", "BLU", get_node("Squadron Panel/15s"))
+	_buildplaneS("F-34", "BLU", get_node("Squadron Panel/15s")) #Naming system is incorrect, F-34 is not a real aircraft. 
 	_buildplaneS("F-35", "BLU", get_node("Squadron Panel/152"))
 	_buildplaneS("F-36", "BLU", get_node("Squadron Panel/153"))
 	_buildplaneS("Su8", "RED", get_node("Squadron Panel/zc7"))
@@ -102,17 +97,11 @@ func _teamSwap(team: String):
 	_on_cancel_squad_pressed()
 		
 
-func MPopIt():
-	MPop = true
-	get_node("Panel4/MDonel").text = "SPENT"
+#Make M/A/SPopit parameterized instead of 3 separate variables
+func mark_as_spent(variable: String, label_path: String):
+	set(variable, true)
+	get_node(label_path).text = "SPENT"
 
-func APopIt():
-	APop = true
-	get_node("Panel5/ADone").text = "SPENT"
-
-func SPopIt():
-	SPop = true
-	get_node("Panel6/SDone").text = "SPENT"
 	
 func _on_press(name: String):
 	print(name)
@@ -206,62 +195,79 @@ func _buildplaneS(inpName: String, inpLoyalty: String, squadron: Object):
 	NuPlane.cell = squadron.cell
 	NuPlane.home_squad = squadron
 
-func _move(planeName, target):
-	if (state == "move") && (!MPop):
-		if (get_node(planeName).movRange >= abs(get_node(planeName).cell - target)):
-			if get_node(planeName).cell == 0 || get_node(planeName).cell == 6:
-				print("TRY ERASE")
-				get_node(planeName).home_squad._flyOff(get_node(planeName))
-			oldcell = positiongrid[get_node(planeName).cell]
-			positiongrid[get_node(planeName).cell].remove_at(positiongrid[get_node(planeName).cell].find(planeName))
-			if get_node(planeName).cell != 0 && get_node(planeName).cell != 6:
-				for plane in oldcell:
-					get_node(plane).position.x = 400 + (positiongrid[get_node(planeName).cell].find(plane)) * spacer
-				
-			get_node(planeName).cell = target
-			positiongrid[target].append(planeName)
-			match target:
-				0:get_node(planeName).position.y = ord0
-				1:get_node(planeName).position.y = ord1
-				2:get_node(planeName).position.y = ord2
-				3:get_node(planeName).position.y = ord3
-				4:get_node(planeName).position.y = ord4
-				5:get_node(planeName).position.y = ord5
-				6:get_node(planeName).position.y = ord6
-			get_node(planeName).position.x = 400 + (positiongrid[target].size() - 1) * spacer
-			MPopIt()
-			
-			
-			
+func _move(plane_name: String, target: int):
+	# Guard
+	if state != "move" or MPop:
+		return
+	
+	var plane = get_node(plane_name)
+	var distance = abs(plane.cell - target)
+	
+	if plane.movRange < distance:
 		state = "standard"
+		return
+	#Departure from current cell
+	var old_idx = plane.cell
+	
+	# Boundary handling
+	if old_idx == 0 or old_idx == 6:
+		print("TRY ERASE")
+		plane.home_squad._flyOff(plane)
+	
+	# Remove from current grid and realign the remaining planes in that row
+	positiongrid[old_idx].erase(plane_name)
+	if old_idx != 0 and old_idx != 6:
+		_realign_row(old_idx)
 
-func _debugMove(planeName, target):
-	#Remove selected plane in current row
-	if (get_node(planeName).cell != -1):
-		positiongrid[get_node(planeName).cell].remove_at(positiongrid[get_node(planeName).cell].find(planeName))
-	#Sort current row other planes into row
-	for plane in positiongrid[get_node(planeName).cell]:
-		get_node(plane).position.x = 400 + (positiongrid[get_node(planeName).cell].find(plane)) * spacer
-		
-	get_node(planeName).cell = target
+	# 3. Handle arrival at target cell
+	plane.cell = target
+	positiongrid[target].append(plane_name)
+
+	# Update Y using array lookup
+	if target >= 0 and target < ord_y_positions.size():
+		plane.position.y = ord_y_positions[target]
 	
-	positiongrid[target].append(planeName)
-	match target:
-		0:get_node(planeName).position.y = ord0
-		1:get_node(planeName).position.y = ord1
-		2:get_node(planeName).position.y = ord2
-		3:get_node(planeName).position.y = ord3
-		4:get_node(planeName).position.y = ord4
-		5:get_node(planeName).position.y = ord5
-		6:get_node(planeName).position.y = ord6
-	get_node(planeName).position.x = 400 + (positiongrid[target].size() - 1) * spacer
+	# Calculate new X position
+	var stack_pos = positiongrid[target].size() - 1
+	plane.position.x = 400 + (stack_pos * spacer)
+
+	# 4. Finalize Action
+	mark_as_spent("MPop", "Panel4/MDonel") # Assuming Scene Unique Name for the label
+	state = "standard"
+
+# Helper function to keep row spacing consistent
+func _realign_row(cell_index: int):
+	var row = positiongrid[cell_index]
+	for i in range(row.size()):
+		var p_node = get_node(row[i])
+		p_node.position.x = 400 + (i * spacer)
+
+func _debugMove(plane_name: String, target: int):
+	var plane_node = get_node(plane_name)
+	var old_cell = plane_node.cell
+
+	# 1. Remove from the old row and realign neighbors
+	if old_cell != -1:
+		positiongrid[old_cell].erase(plane_name)
+		_realign_row(old_cell)
+
+	# 2. Update plane state and add to the new row
+	plane_node.cell = target
+	positiongrid[target].append(plane_name)
+
+	# 3. Update Y position using the array lookup
+	if target >= 0 and target < ord_y_positions.size():
+		plane_node.position.y = ord_y_positions[target]
 	
+	# 4. Update X position for the new slot
+	var new_index = positiongrid[target].size() - 1
+	plane_node.position.x = 400 + (new_index * spacer)
 
 func _acquire(planeDoer, planeTarget):
 	if (get_node(planeDoer).acqRange >= abs(get_node(planeDoer).cell - get_node(planeTarget).cell)) && (!APop) && (get_node(planeDoer).loyalty != get_node(planeTarget).loyalty ):
 		if roll(get_node(planeTarget).acqStat,get_node(planeDoer).acqMod):
 			get_node(planeTarget)._acquired()
-		APopIt()
+		mark_as_spent("APop", "Panel5/ADone")
 	state = "standard"
 	selplane = planeDoer
 	
@@ -272,7 +278,7 @@ func _shoot(planeGunner, planeTarget):
 	if (get_node(planeGunner).shotRange >= abs(get_node(planeGunner).cell - get_node(planeTarget).cell)) && get_node(planeTarget).acquired && (!SPop) && (get_node(planeGunner).loyalty != get_node(planeTarget).loyalty) && get_node(planeGunner).shotammo:
 		if roll(get_node(planeGunner).shotRoll,0):
 			_die(get_node(planeTarget))
-		SPopIt()
+		mark_as_spent("SPop", "Panel6/SDone")
 		get_node(planeGunner)._SSpend()
 	state = "standard"
 	selplane = planeGunner
@@ -371,7 +377,7 @@ func _buildsquadron(inpName: String, inpLoyalty: String):
 	NuSquad.name = (inpName)
 	NuSquad.loyalty = (inpLoyalty)
 	$"Squadron Panel".add_child(NuSquad, true)
-	NuSquad.global_position.y = ord3
+	NuSquad.global_position.y = ord_y_positions[3]
 	if inpLoyalty == "RED":
 		NuSquad.modulate = Color(0.8,0.1,0.1,1)
 		REDsquadrongrid.append(NuSquad)
@@ -409,7 +415,7 @@ func _on_deploy_squad_pressed() -> void:
 	if selsquad.loyalty == "RED":
 		REDsquadrongrid.remove_at(REDsquadrongrid.find(selsquad))
 		positiongrid[6].append(selsquad)
-		selsquad.position.y = ord6
+		selsquad.position.y = ord_y_positions[6]
 		_fixOrder(positiongrid[6])
 		_fixOrder(REDsquadrongrid)
 		selsquad.cell = 6
@@ -418,7 +424,7 @@ func _on_deploy_squad_pressed() -> void:
 	elif selsquad.loyalty == "BLU":
 		BLUsquadrongrid.remove_at(BLUsquadrongrid.find(selsquad))
 		positiongrid[0].append(selsquad)
-		selsquad.position.y = ord0
+		selsquad.position.y = ord_y_positions[0]
 		_fixOrder(positiongrid[0])
 		_fixOrder(BLUsquadrongrid)
 		selsquad.cell = 0
@@ -432,5 +438,5 @@ func _bomb(planeTarget, planeGunner):
 	if (get_node(planeGunner).shotRange >= abs(get_node(planeGunner).cell - planeTarget.cell)) && (!SPop) && (get_node(planeGunner).loyalty != planeTarget.loyalty) && get_node(planeGunner).bombammo:
 			if roll(get_node(planeGunner).shotRoll,0):
 				_bombsquadron(planeTarget, get_node(planeGunner).bombdamage)
-			SPopIt()
+			mark_as_spent("SPop", "Panel6/SDone")
 			get_node(planeGunner)._BSpend()
